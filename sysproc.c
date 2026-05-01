@@ -89,3 +89,19 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+int
+sys_date(void)
+{
+  struct rtcdate *r;
+
+  // 从用户态获取传递进来的指针
+  // argptr 会进行安全检查，防止非法指针访问内核空间
+  if(argptr(0, (void*)&r, sizeof(*r)) < 0)
+    return -1;
+
+  // cmostime 是 lapic.c 中提供的函数，可以直接读取硬件实时时钟
+  cmostime(r);
+
+  return 0;
+}
