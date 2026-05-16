@@ -54,6 +54,26 @@ trap(struct trapframe *tf)
       wakeup(&ticks);
       release(&tickslock);
     }
+
+    // 只有在当前有进程运行，且来自用户空间((tf->cs & 3) == 3)时，才计算tick
+    if(myproc() != 0 && (tf->cs & 3) == 3){
+      if(myproc()->alarmticks > 0){
+        myproc()->ticks_count++;
+        // 达到预设的 ticks 数
+        if(myproc()->ticks_count == myproc()->alarmticks){
+          // 重置计数器
+          myproc()->ticks_count = 0;
+
+          // 把当前被打断的指令地址压入用户栈
+          myproc()->tf->esp -= 4;
+          *((uint*)(myproc()->tf->esp)) = myproc()->tf->eip;
+
+          // 将 eip 修改为 handler 的地址
+          myproc()->tf->eip = (uint)myproc()->alarmhandler;
+        }
+      }
+    }
+
     lapiceoi();
     break;
   case T_IRQ0 + IRQ_IDE:

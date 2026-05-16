@@ -105,3 +105,23 @@ sys_date(void)
 
   return 0;
 }
+
+int
+sys_alarm(void)
+{
+  int ticks;
+  void (*handler)();
+
+  // 获取用户传入的第一个参数 (ticks) 和第二个参数
+  if(argint(0, &ticks) < 0)
+    return -1;
+  if(argptr(1, (char**)&handler, 1) < 0)
+    return -1;
+  
+  // 保存到当前进程的结构体中
+  myproc()->alarmticks = ticks;
+  myproc()->alarmhandler = handler;
+  myproc()->ticks_count = 0;
+
+  return 0;
+}

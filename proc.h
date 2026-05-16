@@ -49,6 +49,9 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+  int alarmticks;              // 报警时间间隔
+  void (*alarmhandler)();      // 报警处理函数的函数指针
+  int ticks_count;             // 记录距离上次报警已经过去了多少 ticks
 };
 
 // Process memory is laid out contiguously, low addresses first:
