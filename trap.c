@@ -14,6 +14,8 @@ extern uint vectors[];  // in vectors.S: array of 256 entry pointers
 struct spinlock tickslock;
 uint ticks;
 
+int mappages(pde_t *pgdir, void *va, uint size, uint pa, int perm);
+
 void
 tvinit(void)
 {
@@ -76,6 +78,55 @@ trap(struct trapframe *tf)
 
     lapiceoi();
     break;
+
+  // 延迟分配
+  case T_PGFLT: {
+    
+    uint va;
+    uint a;
+    char *mem;
+    struct proc *curproc;
+
+    // 获取引发页错误的虚拟地址
+    va = rcr2();
+    curproc = myproc();
+
+    // 边界检查
+    // va必须小于当前进程的虚拟空间大小sz
+    // va不能越界到用户栈下方过深的非法保护页
+    if(va >= curproc->sz || va >= KERNBASE || va < curproc->tf->esp) {
+      if(curproc->pid == 1){  // init进程不能被杀
+        panic("trap: page fault in init");
+      }
+      cprintf("pid %d %s: trap %d err %d on cpu %d eip 0x%x addr 0x%x--kill proc\n",
+              curproc->pid, curproc->name, tf->trapno, tf->err, cpuid(), tf->eip, va);
+      curproc->killed = 1;
+      break;
+    }
+
+    // 计算对齐后的虚拟页边界
+    a = PGROUNDDOWN(va);
+
+    // 分配物理内存页
+    mem = kalloc();
+    if (mem == 0) {
+      cprintf("Lazy alloc: out of physical memory\n");
+      curproc->killed = 1;
+      break;
+    }
+
+    // 清零新分配的页面
+    memset(mem, 0, PGSIZE);
+
+    // 建立映射关系
+    if(mappages(curproc->pgdir, (char*)a, PGSIZE, V2P(mem), PTE_W|PTE_U) < 0){
+      cprintf("Lazy alloc: mappages failed\n");
+      kfree(mem);
+      curproc->killed = 1;
+      break;
+    }
+    break;
+  }
   case T_IRQ0 + IRQ_IDE:
     ideintr();
     lapiceoi();

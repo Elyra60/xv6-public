@@ -9,6 +9,7 @@
 
 extern char data[];  // defined by kernel.ld
 pde_t *kpgdir;  // for use in scheduler()
+int mappages(pde_t *pgdir, void *va, uint size, uint pa, int perm);
 
 // Set up CPU's kernel segment descriptors.
 // Run once on entry on each CPU.
@@ -37,6 +38,9 @@ walkpgdir(pde_t *pgdir, const void *va, int alloc)
 {
   pde_t *pde;
   pte_t *pgtab;
+  pte_t *pte;
+  struct proc *curproc;
+  char *mem;
 
   pde = &pgdir[PDX(va)];
   if(*pde & PTE_P){
@@ -51,13 +55,31 @@ walkpgdir(pde_t *pgdir, const void *va, int alloc)
     // entries, if necessary.
     *pde = V2P(pgtab) | PTE_P | PTE_W | PTE_U;
   }
-  return &pgtab[PTX(va)];
+
+  pte = &pgtab[PTX(va)];
+
+  // 如果内核在检查一个合法的延迟分配用户指针，且该页尚未分配物理内存
+  if(alloc == 0 && pte && !(*pte & PTE_P)){
+    curproc = myproc();
+    // 检查此va是否在当前进程合法的延迟分配堆空间内
+    if(curproc && (uint)va < curproc->sz && (uint)va < KERNBASE && (uint)va >= curproc->tf->esp){
+      mem = kalloc();
+      if(mem){
+        memset(mem, 0, PGSIZE);
+        if(mappages(pgdir, (void*)PGROUNDDOWN((uint)va), PGSIZE, V2P(mem), PTE_W|PTE_U) == 0){
+          return pte;
+        }
+        kfree(mem);
+      }
+    }
+  }
+  return pte;
 }
 
 // Create PTEs for virtual addresses starting at va that refer to
 // physical addresses starting at pa. va and size might not
 // be page-aligned.
-static int
+int
 mappages(pde_t *pgdir, void *va, uint size, uint pa, int perm)
 {
   char *a, *last;
@@ -265,7 +287,7 @@ deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
   for(; a  < oldsz; a += PGSIZE){
     pte = walkpgdir(pgdir, (char*)a, 0);
     if(!pte)
-      a = PGADDR(PDX(a) + 1, 0, 0) - PGSIZE;
+      continue; // 页表项不存在则跳过
     else if((*pte & PTE_P) != 0){
       pa = PTE_ADDR(*pte);
       if(pa == 0)
@@ -324,9 +346,9 @@ copyuvm(pde_t *pgdir, uint sz)
     return 0;
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walkpgdir(pgdir, (void *) i, 0)) == 0)
-      panic("copyuvm: pte should exist");
+      continue; // 如果页表项不存在，直接跳过，允许延迟分配
     if(!(*pte & PTE_P))
-      panic("copyuvm: page not present");
+      continue; // 如果物理页不存在（未实际分配），直接跳过
     pa = PTE_ADDR(*pte);
     flags = PTE_FLAGS(*pte);
     if((mem = kalloc()) == 0)

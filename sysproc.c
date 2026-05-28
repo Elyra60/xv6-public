@@ -47,12 +47,25 @@ sys_sbrk(void)
 {
   int addr;
   int n;
+  struct proc *curproc = myproc();
 
   if(argint(0, &n) < 0)
     return -1;
+
   addr = myproc()->sz;
-  if(growproc(n) < 0)
-    return -1;
+
+  if(n < 0){
+    // 如果是负数，代表缩减堆空间，直接调用原有的growproc释放物理内存
+    if(growproc(n) < 0)
+      return -1;
+  } else{
+    // 检查是否超出用户空间最大限制(KERNBASE)
+    if(curproc->sz + n >= KERNBASE || curproc->sz + n < curproc->sz)
+      return -1;
+    // 延迟分配：仅增加虚拟地址空间大小，不实际分配物理页面
+    myproc()->sz += n;
+  }
+  
   return addr;
 }
 
